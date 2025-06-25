@@ -1,257 +1,857 @@
 --[[
-    Roblox UI Library - Estrutura Base
-    Inspirada em Rayfield, mas com API mais flexível e fácil de expandir.
-    Para uso: local Library = loadstring(game:HttpGet("URL"))()
+NovaUILibrary - Parte 1
+Inspirada em Rayfield, mas com design próprio, temas, animações e estrutura extensível.
+Esta é a primeira parte: Utilitários, Temas, Window (barra superior, minimizar, fechar, arrastar, animações), Inicialização.
 ]]
 
-local Library = {}
-Library.__index = Library
+local NovaUILibrary = {}
+NovaUILibrary.__index = NovaUILibrary
 
--- Utilitário para criar instâncias
-local function create(class, props)
-    local obj = Instance.new(class)
-    for k, v in pairs(props or {}) do
-        obj[k] = v
+--// UTILITÁRIOS GERAIS //--
+local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+-- TableUtils: funções para manipulação de tabelas
+local TableUtils = {}
+function TableUtils.ShallowCopy(tbl)
+    local t = {}
+    for k, v in pairs(tbl) do t[k] = v end
+    return t
+end
+function TableUtils.DeepCopy(tbl)
+    local t = {}
+    for k, v in pairs(tbl) do
+        if type(v) == "table" then t[k] = TableUtils.DeepCopy(v) else t[k] = v end
     end
-    return obj
+    return t
 end
 
--- Window
-function Library:NewWindow(name)
-    local self = setmetatable({}, Library)
-    self.Name = name or "Window"
+-- Tween utilitário
+local function Tween(obj, props, time, style, dir)
+    local info = TweenInfo.new(time or 0.25, style or Enum.EasingStyle.Quad, dir or Enum.EasingDirection.Out)
+    local tween = TweenService:Create(obj, info, props)
+    tween:Play()
+    return tween
+end
+
+-- Draggable utilitário
+local function MakeDraggable(frame, dragBar)
+    local dragging, dragInput, mousePos, framePos
+    dragBar = dragBar or frame
+    dragBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            mousePos = input.Position
+            framePos = frame.Position
+        end
+    end)
+    dragBar.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+    end)
+    dragBar.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement and dragging then
+            local delta = input.Position - mousePos
+            frame.Position = UDim2.new(framePos.X.Scale, framePos.X.Offset + delta.X, framePos.Y.Scale, framePos.Y.Offset + delta.Y)
+        end
+    end)
+end
+
+--// SISTEMA DE TEMAS //--
+local Themes = {
+    ["Dark"] = {
+        Background = Color3.fromRGB(25, 25, 25),
+        Topbar = Color3.fromRGB(34, 34, 34),
+        Shadow = Color3.fromRGB(20, 20, 20),
+        Text = Color3.fromRGB(240, 240, 240),
+        Accent = Color3.fromRGB(0, 146, 214),
+        Button = Color3.fromRGB(60, 60, 60),
+        ButtonHover = Color3.fromRGB(80, 80, 80),
+        Border = Color3.fromRGB(50, 50, 50),
+        Tab = Color3.fromRGB(80, 80, 80),
+        TabSelected = Color3.fromRGB(210, 210, 210),
+        Input = Color3.fromRGB(30, 30, 30),
+        Placeholder = Color3.fromRGB(178, 178, 178),
+        ToggleOn = Color3.fromRGB(0, 146, 214),
+        ToggleOff = Color3.fromRGB(100, 100, 100),
+        Slider = Color3.fromRGB(50, 138, 220),
+        Notification = Color3.fromRGB(20, 20, 20),
+    },
+    ["Light"] = {
+        Background = Color3.fromRGB(240, 240, 240),
+        Topbar = Color3.fromRGB(220, 220, 220),
+        Shadow = Color3.fromRGB(200, 200, 200),
+        Text = Color3.fromRGB(30, 30, 30),
+        Accent = Color3.fromRGB(0, 146, 214),
+        Button = Color3.fromRGB(220, 220, 220),
+        ButtonHover = Color3.fromRGB(200, 200, 200),
+        Border = Color3.fromRGB(180, 180, 180),
+        Tab = Color3.fromRGB(200, 200, 200),
+        TabSelected = Color3.fromRGB(0, 146, 214),
+        Input = Color3.fromRGB(255, 255, 255),
+        Placeholder = Color3.fromRGB(120, 120, 120),
+        ToggleOn = Color3.fromRGB(0, 146, 214),
+        ToggleOff = Color3.fromRGB(180, 180, 180),
+        Slider = Color3.fromRGB(0, 146, 214),
+        Notification = Color3.fromRGB(220, 220, 220),
+    },
+}
+
+--// CRIAÇÃO DO WINDOW //--
+function NovaUILibrary:CreateWindow(opts)
+    opts = opts or {}
+    local theme = TableUtils.ShallowCopy(Themes[opts.Theme or "Dark"])
+    local self = setmetatable({}, NovaUILibrary)
+    self.Theme = theme
+    self.Name = opts.Name or "NovaUILibrary"
+    self.MinimizeKey = opts.MinimizeKey or Enum.KeyCode.RightControl
+    self.Tabs = {}
     self.Sections = {}
+    self.Visible = true
+    self.Minimized = false
 
-    -- Criar a ScreenGui principal
-    self.Gui = create("ScreenGui", {
-        Name = self.Name .. "_UI",
-        ResetOnSpawn = false,
-        Parent = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
-    })
+    -- ScreenGui
+    self.Gui = Instance.new("ScreenGui")
+    self.Gui.Name = self.Name .. "_UI"
+    self.Gui.ResetOnSpawn = false
+    self.Gui.Parent = PlayerGui
 
-    -- Container principal
-    self.Main = create("Frame", {
-        Name = "MainFrame",
-        Size = UDim2.new(0, 500, 0, 400),
-        Position = UDim2.new(0.5, -250, 0.5, -200),
-        BackgroundColor3 = Color3.fromRGB(30, 30, 30),
-        BorderSizePixel = 0,
-        Parent = self.Gui
-    })
+    -- Sombra
+    self.Shadow = Instance.new("Frame")
+    self.Shadow.Name = "Shadow"
+    self.Shadow.Size = UDim2.new(0, 520, 0, 420)
+    self.Shadow.Position = UDim2.new(0.5, -260, 0.5, -210)
+    self.Shadow.BackgroundColor3 = theme.Shadow
+    self.Shadow.BorderSizePixel = 0
+    self.Shadow.BackgroundTransparency = 0.4
+    self.Shadow.ZIndex = 0
+    self.Shadow.Parent = self.Gui
+
+    -- Main Window
+    self.Main = Instance.new("Frame")
+    self.Main.Name = "MainFrame"
+    self.Main.Size = UDim2.new(0, 500, 0, 400)
+    self.Main.Position = UDim2.new(0.5, -250, 0.5, -200)
+    self.Main.BackgroundColor3 = theme.Background
+    self.Main.BorderSizePixel = 0
+    self.Main.ZIndex = 1
+    self.Main.Parent = self.Gui
+
+    -- Barra Superior
+    self.Topbar = Instance.new("Frame")
+    self.Topbar.Name = "Topbar"
+    self.Topbar.Size = UDim2.new(1, 0, 0, 38)
+    self.Topbar.BackgroundColor3 = theme.Topbar
+    self.Topbar.BorderSizePixel = 0
+    self.Topbar.ZIndex = 2
+    self.Topbar.Parent = self.Main
 
     -- Título
-    local title = create("TextLabel", {
-        Name = "Title",
-        Text = self.Name,
-        Size = UDim2.new(1, 0, 0, 40),
-        BackgroundTransparency = 1,
-        TextColor3 = Color3.fromRGB(255,255,255),
-        Font = Enum.Font.GothamBold,
-        TextSize = 24,
-        Parent = self.Main
-    })
+    self.Title = Instance.new("TextLabel")
+    self.Title.Name = "Title"
+    self.Title.Text = self.Name
+    self.Title.Size = UDim2.new(1, -100, 1, 0)
+    self.Title.Position = UDim2.new(0, 12, 0, 0)
+    self.Title.BackgroundTransparency = 1
+    self.Title.TextColor3 = theme.Text
+    self.Title.Font = Enum.Font.GothamBold
+    self.Title.TextSize = 22
+    self.Title.TextXAlignment = Enum.TextXAlignment.Left
+    self.Title.ZIndex = 3
+    self.Title.Parent = self.Topbar
 
-    -- Layout para seções
-    self.SectionLayout = create("UIListLayout", {
-        Parent = self.Main,
-        SortOrder = Enum.SortOrder.LayoutOrder,
-        Padding = UDim.new(0, 8)
-    })
+    -- Botão Minimizar
+    self.MinBtn = Instance.new("TextButton")
+    self.MinBtn.Name = "Minimize"
+    self.MinBtn.Text = "_"
+    self.MinBtn.Size = UDim2.new(0, 38, 1, 0)
+    self.MinBtn.Position = UDim2.new(1, -76, 0, 0)
+    self.MinBtn.BackgroundColor3 = theme.Topbar
+    self.MinBtn.TextColor3 = theme.Text
+    self.MinBtn.Font = Enum.Font.GothamBold
+    self.MinBtn.TextSize = 24
+    self.MinBtn.BorderSizePixel = 0
+    self.MinBtn.ZIndex = 4
+    self.MinBtn.Parent = self.Topbar
 
-    function self:NewSection(sectionName)
-        local section = {}
-        section.Name = sectionName or "Section"
-        section.Components = {}
+    -- Botão Fechar
+    self.CloseBtn = Instance.new("TextButton")
+    self.CloseBtn.Name = "Close"
+    self.CloseBtn.Text = "✕"
+    self.CloseBtn.Size = UDim2.new(0, 38, 1, 0)
+    self.CloseBtn.Position = UDim2.new(1, -38, 0, 0)
+    self.CloseBtn.BackgroundColor3 = theme.Topbar
+    self.CloseBtn.TextColor3 = Color3.fromRGB(255, 80, 80)
+    self.CloseBtn.Font = Enum.Font.GothamBold
+    self.CloseBtn.TextSize = 22
+    self.CloseBtn.BorderSizePixel = 0
+    self.CloseBtn.ZIndex = 4
+    self.CloseBtn.Parent = self.Topbar
 
-        section.Frame = create("Frame", {
-            Name = section.Name .. "_Frame",
-            Size = UDim2.new(1, -16, 0, 60),
-            BackgroundColor3 = Color3.fromRGB(40, 40, 40),
-            BorderSizePixel = 0,
-            Parent = self.Main
-        })
-        create("UIListLayout", {
-            Parent = section.Frame,
-            SortOrder = Enum.SortOrder.LayoutOrder,
-            Padding = UDim.new(0, 6)
-        })
-        local label = create("TextLabel", {
-            Name = "SectionLabel",
-            Text = section.Name,
-            Size = UDim2.new(1, 0, 0, 24),
-            BackgroundTransparency = 1,
-            TextColor3 = Color3.fromRGB(200,200,200),
-            Font = Enum.Font.Gotham,
-            TextSize = 18,
-            Parent = section.Frame
-        })
-
-        -- Button
-        function section:CreateButton(text, callback)
-            local btn = create("TextButton", {
-                Name = text .. "_Button",
-                Text = text,
-                Size = UDim2.new(1, 0, 0, 32),
-                BackgroundColor3 = Color3.fromRGB(60, 60, 60),
-                TextColor3 = Color3.fromRGB(255,255,255),
-                Font = Enum.Font.Gotham,
-                TextSize = 16,
-                Parent = section.Frame
-            })
-            btn.MouseButton1Click:Connect(function()
-                if callback then callback() end
-            end)
-            table.insert(section.Components, btn)
-            return btn
+    -- Animação de Minimizar
+    self.MinBtn.MouseButton1Click:Connect(function()
+        if not self.Minimized then
+            Tween(self.Main, {Size = UDim2.new(0, 500, 0, 38)}, 0.3)
+            Tween(self.Shadow, {Size = UDim2.new(0, 520, 0, 58)}, 0.3)
+            self.Minimized = true
+        else
+            Tween(self.Main, {Size = UDim2.new(0, 500, 0, 400)}, 0.3)
+            Tween(self.Shadow, {Size = UDim2.new(0, 520, 0, 420)}, 0.3)
+            self.Minimized = false
         end
+    end)
 
-        -- Toggle
-        function section:CreateToggle(text, callback)
-            local toggle = create("TextButton", {
-                Name = text .. "_Toggle",
-                Text = "[ ] " .. text,
-                Size = UDim2.new(1, 0, 0, 32),
-                BackgroundColor3 = Color3.fromRGB(60, 60, 60),
-                TextColor3 = Color3.fromRGB(255,255,255),
-                Font = Enum.Font.Gotham,
-                TextSize = 16,
-                Parent = section.Frame
-            })
-            local state = false
-            toggle.MouseButton1Click:Connect(function()
-                state = not state
-                toggle.Text = (state and "[X] " or "[ ] ") .. text
-                if callback then callback(state) end
-            end)
-            table.insert(section.Components, toggle)
-            return toggle
+    -- Animação de Fechar
+    self.CloseBtn.MouseButton1Click:Connect(function()
+        Tween(self.Main, {BackgroundTransparency = 1}, 0.2)
+        Tween(self.Shadow, {BackgroundTransparency = 1}, 0.2)
+        wait(0.22)
+        self.Gui:Destroy()
+    end)
+
+    -- Arrastar
+    MakeDraggable(self.Main, self.Topbar)
+
+    -- Atalho para minimizar
+    game:GetService("UserInputService").InputBegan:Connect(function(input, gpe)
+        if gpe then return end
+        if input.KeyCode == self.MinimizeKey then
+            self.MinBtn:Activate()
         end
+    end)
 
-        -- TextBox
-        function section:CreateTextbox(text, callback)
-            local box = create("TextBox", {
-                Name = text .. "_Textbox",
-                Text = "",
-                PlaceholderText = text,
-                Size = UDim2.new(1, 0, 0, 32),
-                BackgroundColor3 = Color3.fromRGB(60, 60, 60),
-                TextColor3 = Color3.fromRGB(255,255,255),
-                Font = Enum.Font.Gotham,
-                TextSize = 16,
-                Parent = section.Frame
-            })
-            box.FocusLost:Connect(function(enter)
-                if enter and callback then callback(box.Text) end
-            end)
-            table.insert(section.Components, box)
-            return box
-        end
-
-        -- Dropdown
-        function section:CreateDropdown(text, options, default, callback)
-            local dropdown = create("TextButton", {
-                Name = text .. "_Dropdown",
-                Text = text .. ": " .. tostring(options[default] or options[1]),
-                Size = UDim2.new(1, 0, 0, 32),
-                BackgroundColor3 = Color3.fromRGB(60, 60, 60),
-                TextColor3 = Color3.fromRGB(255,255,255),
-                Font = Enum.Font.Gotham,
-                TextSize = 16,
-                Parent = section.Frame
-            })
-            local idx = default or 1
-            dropdown.MouseButton1Click:Connect(function()
-                idx = idx + 1
-                if idx > #options then idx = 1 end
-                dropdown.Text = text .. ": " .. tostring(options[idx])
-                if callback then callback(options[idx]) end
-            end)
-            table.insert(section.Components, dropdown)
-            return dropdown
-        end
-
-        -- Slider
-        function section:CreateSlider(text, min, max, default, precise, callback)
-            local sliderFrame = create("Frame", {
-                Name = text .. "_SliderFrame",
-                Size = UDim2.new(1, 0, 0, 32),
-                BackgroundTransparency = 1,
-                Parent = section.Frame
-            })
-            local label = create("TextLabel", {
-                Name = "SliderLabel",
-                Text = text .. ": " .. tostring(default),
-                Size = UDim2.new(0.5, 0, 1, 0),
-                BackgroundTransparency = 1,
-                TextColor3 = Color3.fromRGB(255,255,255),
-                Font = Enum.Font.Gotham,
-                TextSize = 16,
-                Parent = sliderFrame
-            })
-            local slider = create("TextButton", {
-                Name = text .. "_Slider",
-                Text = tostring(default),
-                Size = UDim2.new(0.5, 0, 1, 0),
-                Position = UDim2.new(0.5, 0, 0, 0),
-                BackgroundColor3 = Color3.fromRGB(80, 80, 80),
-                TextColor3 = Color3.fromRGB(255,255,255),
-                Font = Enum.Font.Gotham,
-                TextSize = 16,
-                Parent = sliderFrame
-            })
-            local value = default or min
-            slider.MouseButton1Click:Connect(function()
-                value = value + (precise and 0.1 or 1)
-                if value > max then value = min end
-                label.Text = text .. ": " .. tostring(value)
-                slider.Text = tostring(value)
-                if callback then callback(value) end
-            end)
-            table.insert(section.Components, sliderFrame)
-            return sliderFrame
-        end
-
-        -- ColorPicker (simples)
-        function section:CreateColorPicker(text, default, callback)
-            local btn = create("TextButton", {
-                Name = text .. "_ColorPicker",
-                Text = text,
-                Size = UDim2.new(1, 0, 0, 32),
-                BackgroundColor3 = default or Color3.fromRGB(255,255,255),
-                TextColor3 = Color3.fromRGB(0,0,0),
-                Font = Enum.Font.Gotham,
-                TextSize = 16,
-                Parent = section.Frame
-            })
-            btn.MouseButton1Click:Connect(function()
-                -- Simples: alterna entre algumas cores
-                local colors = {
-                    Color3.fromRGB(255,255,255),
-                    Color3.fromRGB(255,0,0),
-                    Color3.fromRGB(0,255,0),
-                    Color3.fromRGB(0,0,255),
-                    Color3.fromRGB(255,255,0)
-                }
-                local idx = 1
-                for i, c in ipairs(colors) do
-                    if btn.BackgroundColor3 == c then
-                        idx = i
-                        break
-                    end
-                end
-                idx = idx % #colors + 1
-                btn.BackgroundColor3 = colors[idx]
-                if callback then callback(colors[idx]) end
-            end)
-            table.insert(section.Components, btn)
-            return btn
-        end
-
-        table.insert(self.Sections, section)
-        return section
-    end
+    -- Layout para Tabs (próxima parte)
+    self.TabHolder = Instance.new("Frame")
+    self.TabHolder.Name = "TabHolder"
+    self.TabHolder.Size = UDim2.new(1, 0, 1, -38)
+    self.TabHolder.Position = UDim2.new(0, 0, 0, 38)
+    self.TabHolder.BackgroundTransparency = 1
+    self.TabHolder.ZIndex = 2
+    self.TabHolder.Parent = self.Main
 
     return self
 end
 
-return Library 
+--// PARTE 2: TABS E SECTIONS //--
+
+-- Tab Class
+local TabClass = {}
+TabClass.__index = TabClass
+
+function TabClass:CreateSection(sectionName)
+    local section = setmetatable({}, {
+        __index = function(t, k) return rawget(t, k) or TabClass[k] end
+    })
+    section.Name = sectionName or "Section"
+    section.Components = {}
+    section.ParentTab = self
+
+    -- Section Frame
+    section.Frame = Instance.new("Frame")
+    section.Frame.Name = section.Name .. "_Section"
+    section.Frame.Size = UDim2.new(1, -24, 0, 0)
+    section.Frame.BackgroundTransparency = 1
+    section.Frame.AutomaticSize = Enum.AutomaticSize.Y
+    section.Frame.ZIndex = 10
+    section.Frame.Parent = self.SectionHolder
+
+    -- Section Title
+    section.Title = Instance.new("TextLabel")
+    section.Title.Name = "SectionTitle"
+    section.Title.Text = section.Name
+    section.Title.Size = UDim2.new(1, 0, 0, 28)
+    section.Title.BackgroundTransparency = 1
+    section.Title.TextColor3 = self.ParentWindow.Theme.Text
+    section.Title.Font = Enum.Font.GothamBold
+    section.Title.TextSize = 18
+    section.Title.TextXAlignment = Enum.TextXAlignment.Left
+    section.Title.ZIndex = 11
+    section.Title.Parent = section.Frame
+
+    -- Layout para componentes
+    section.Layout = Instance.new("UIListLayout")
+    section.Layout.Parent = section.Frame
+    section.Layout.SortOrder = Enum.SortOrder.LayoutOrder
+    section.Layout.Padding = UDim.new(0, 8)
+
+    table.insert(self.Sections, section)
+    return section
+end
+
+-- Criação de Tabs
+function NovaUILibrary:CreateTab(tabName, tabIcon)
+    local tab = setmetatable({}, TabClass)
+    tab.Name = tabName or "Tab"
+    tab.Icon = tabIcon or nil
+    tab.Sections = {}
+    tab.ParentWindow = self
+
+    -- Botão da Tab
+    tab.Button = Instance.new("TextButton")
+    tab.Button.Name = tab.Name .. "_TabButton"
+    tab.Button.Text = tab.Name
+    tab.Button.Size = UDim2.new(0, 120, 0, 36)
+    tab.Button.BackgroundColor3 = self.Theme.Tab
+    tab.Button.TextColor3 = self.Theme.Text
+    tab.Button.Font = Enum.Font.GothamBold
+    tab.Button.TextSize = 16
+    tab.Button.BorderSizePixel = 0
+    tab.Button.ZIndex = 5
+    tab.Button.Parent = self.TabHolder
+
+    -- Tab Highlight
+    tab.Highlight = Instance.new("Frame")
+    tab.Highlight.Name = "Highlight"
+    tab.Highlight.Size = UDim2.new(1, 0, 0, 3)
+    tab.Highlight.Position = UDim2.new(0, 0, 1, -3)
+    tab.Highlight.BackgroundColor3 = self.Theme.Accent
+    tab.Highlight.BorderSizePixel = 0
+    tab.Highlight.Visible = false
+    tab.Highlight.ZIndex = 6
+    tab.Highlight.Parent = tab.Button
+
+    -- Section Holder (conteúdo da tab)
+    tab.SectionHolder = Instance.new("Frame")
+    tab.SectionHolder.Name = tab.Name .. "_SectionHolder"
+    tab.SectionHolder.Size = UDim2.new(1, -24, 1, -48)
+    tab.SectionHolder.Position = UDim2.new(0, 12, 0, 48)
+    tab.SectionHolder.BackgroundTransparency = 1
+    tab.SectionHolder.Visible = false
+    tab.SectionHolder.ZIndex = 10
+    tab.SectionHolder.Parent = self.Main
+
+    -- Layout para Sections
+    tab.SectionLayout = Instance.new("UIListLayout")
+    tab.SectionLayout.Parent = tab.SectionHolder
+    tab.SectionLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    tab.SectionLayout.Padding = UDim.new(0, 16)
+
+    -- Tab Button Click
+    tab.Button.MouseButton1Click:Connect(function()
+        self:SelectTab(tab)
+    end)
+
+    table.insert(self.Tabs, tab)
+    if #self.Tabs == 1 then
+        self:SelectTab(tab)
+    end
+    return tab
+end
+
+-- Selecionar Tab
+function NovaUILibrary:SelectTab(tab)
+    for _, t in ipairs(self.Tabs) do
+        t.SectionHolder.Visible = false
+        t.Button.BackgroundColor3 = self.Theme.Tab
+        t.Button.TextColor3 = self.Theme.Text
+        t.Highlight.Visible = false
+    end
+    tab.SectionHolder.Visible = true
+    tab.Button.BackgroundColor3 = self.Theme.TabSelected
+    tab.Button.TextColor3 = self.Theme.Accent
+    tab.Highlight.Visible = true
+    -- Animação de destaque
+    Tween(tab.Highlight, {BackgroundTransparency = 0}, 0.2)
+end
+
+-- Atalho: NovaUILibrary:CreateTab = NovaUILibrary.CreateTab
+NovaUILibrary.CreateTab = NovaUILibrary.CreateTab
+
+--// PARTE 3: COMPONENTES //--
+
+-- Helper para criar botões estilizados
+local function CreateStyledButton(text, theme, parent)
+    local btn = Instance.new("TextButton")
+    btn.Name = text .. "_Button"
+    btn.Text = text
+    btn.Size = UDim2.new(1, 0, 0, 32)
+    btn.BackgroundColor3 = theme.Button
+    btn.TextColor3 = theme.Text
+    btn.Font = Enum.Font.Gotham
+    btn.TextSize = 16
+    btn.BorderSizePixel = 0
+    btn.AutoButtonColor = false
+    btn.ZIndex = 20
+    btn.Parent = parent
+    btn.MouseEnter:Connect(function()
+        Tween(btn, {BackgroundColor3 = theme.ButtonHover}, 0.15)
+    end)
+    btn.MouseLeave:Connect(function()
+        Tween(btn, {BackgroundColor3 = theme.Button}, 0.15)
+    end)
+    return btn
+end
+
+-- SECTION: CreateButton
+function TabClass:CreateButton(opts)
+    opts = type(opts) == "table" and opts or {Name = tostring(opts)}
+    local btn = CreateStyledButton(opts.Name or "Button", self.ParentWindow.Theme, self.Frame)
+    btn.MouseButton1Click:Connect(function()
+        if opts.Callback then opts.Callback() end
+    end)
+    table.insert(self.Components, btn)
+    return btn
+end
+
+-- SECTION: CreateToggle
+function TabClass:CreateToggle(opts)
+    opts = type(opts) == "table" and opts or {Name = tostring(opts)}
+    local theme = self.ParentWindow.Theme
+    local toggle = Instance.new("TextButton")
+    toggle.Name = opts.Name .. "_Toggle"
+    toggle.Size = UDim2.new(1, 0, 0, 32)
+    toggle.BackgroundColor3 = theme.Button
+    toggle.TextColor3 = theme.Text
+    toggle.Font = Enum.Font.Gotham
+    toggle.TextSize = 16
+    toggle.BorderSizePixel = 0
+    toggle.AutoButtonColor = false
+    toggle.ZIndex = 20
+    toggle.Parent = self.Frame
+    local state = opts.CurrentValue or false
+    local function updateText()
+        toggle.Text = (state and "[✔] " or "[  ] ") .. (opts.Name or "Toggle")
+    end
+    updateText()
+    toggle.MouseButton1Click:Connect(function()
+        state = not state
+        updateText()
+        Tween(toggle, {BackgroundColor3 = state and theme.ToggleOn or theme.Button}, 0.15)
+        if opts.Callback then opts.Callback(state) end
+    end)
+    toggle.MouseEnter:Connect(function()
+        Tween(toggle, {BackgroundColor3 = theme.ButtonHover}, 0.15)
+    end)
+    toggle.MouseLeave:Connect(function()
+        Tween(toggle, {BackgroundColor3 = state and theme.ToggleOn or theme.Button}, 0.15)
+    end)
+    table.insert(self.Components, toggle)
+    return toggle
+end
+
+-- SECTION: CreateInput
+function TabClass:CreateInput(opts)
+    opts = type(opts) == "table" and opts or {Name = tostring(opts)}
+    local theme = self.ParentWindow.Theme
+    local frame = Instance.new("Frame")
+    frame.Name = opts.Name .. "_InputFrame"
+    frame.Size = UDim2.new(1, 0, 0, 32)
+    frame.BackgroundColor3 = theme.Input
+    frame.BorderSizePixel = 0
+    frame.ZIndex = 20
+    frame.Parent = self.Frame
+    local box = Instance.new("TextBox")
+    box.Name = opts.Name .. "_Input"
+    box.Size = UDim2.new(1, 0, 1, 0)
+    box.BackgroundTransparency = 1
+    box.Text = opts.CurrentValue or ""
+    box.PlaceholderText = opts.PlaceholderText or opts.Name or "Input"
+    box.TextColor3 = theme.Text
+    box.Font = Enum.Font.Gotham
+    box.TextSize = 16
+    box.ClearTextOnFocus = false
+    box.ZIndex = 21
+    box.Parent = frame
+    box.FocusLost:Connect(function(enter)
+        if enter and opts.Callback then opts.Callback(box.Text) end
+    end)
+    table.insert(self.Components, frame)
+    return box
+end
+
+-- SECTION: CreateDropdown
+function TabClass:CreateDropdown(opts)
+    opts = type(opts) == "table" and opts or {Name = tostring(opts)}
+    local theme = self.ParentWindow.Theme
+    local frame = Instance.new("Frame")
+    frame.Name = opts.Name .. "_DropdownFrame"
+    frame.Size = UDim2.new(1, 0, 0, 32)
+    frame.BackgroundColor3 = theme.Button
+    frame.BorderSizePixel = 0
+    frame.ZIndex = 20
+    frame.Parent = self.Frame
+    local label = Instance.new("TextLabel")
+    label.Name = "DropdownLabel"
+    label.Text = opts.Name or "Dropdown"
+    label.Size = UDim2.new(0.5, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = theme.Text
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 16
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.ZIndex = 21
+    label.Parent = frame
+    local btn = Instance.new("TextButton")
+    btn.Name = "DropdownButton"
+    btn.Text = opts.Options and opts.Options[1] or ""
+    btn.Size = UDim2.new(0.5, 0, 1, 0)
+    btn.Position = UDim2.new(0.5, 0, 0, 0)
+    btn.BackgroundTransparency = 1
+    btn.TextColor3 = theme.Accent
+    btn.Font = Enum.Font.Gotham
+    btn.TextSize = 16
+    btn.ZIndex = 21
+    btn.Parent = frame
+    local idx = 1
+    btn.MouseButton1Click:Connect(function()
+        idx = idx + 1
+        if opts.Options and idx > #opts.Options then idx = 1 end
+        btn.Text = opts.Options and opts.Options[idx] or ""
+        if opts.Callback then opts.Callback(opts.Options[idx]) end
+    end)
+    table.insert(self.Components, frame)
+    return btn
+end
+
+-- SECTION: CreateSlider
+function TabClass:CreateSlider(opts)
+    opts = type(opts) == "table" and opts or {Name = tostring(opts)}
+    local theme = self.ParentWindow.Theme
+    local frame = Instance.new("Frame")
+    frame.Name = opts.Name .. "_SliderFrame"
+    frame.Size = UDim2.new(1, 0, 0, 36)
+    frame.BackgroundTransparency = 1
+    frame.ZIndex = 20
+    frame.Parent = self.Frame
+    local label = Instance.new("TextLabel")
+    label.Name = "SliderLabel"
+    label.Text = (opts.Name or "Slider") .. ": " .. tostring(opts.CurrentValue or (opts.Range and opts.Range[1]) or 0)
+    label.Size = UDim2.new(0.5, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = theme.Text
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 16
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.ZIndex = 21
+    label.Parent = frame
+    local sliderBtn = Instance.new("TextButton")
+    sliderBtn.Name = "SliderButton"
+    sliderBtn.Text = tostring(opts.CurrentValue or (opts.Range and opts.Range[1]) or 0)
+    sliderBtn.Size = UDim2.new(0.5, 0, 1, 0)
+    sliderBtn.Position = UDim2.new(0.5, 0, 0, 0)
+    sliderBtn.BackgroundColor3 = theme.Slider
+    sliderBtn.TextColor3 = theme.Text
+    sliderBtn.Font = Enum.Font.Gotham
+    sliderBtn.TextSize = 16
+    sliderBtn.BorderSizePixel = 0
+    sliderBtn.ZIndex = 21
+    sliderBtn.Parent = frame
+    local min = (opts.Range and opts.Range[1]) or 0
+    local max = (opts.Range and opts.Range[2]) or 100
+    local value = opts.CurrentValue or min
+    sliderBtn.MouseButton1Click:Connect(function()
+        value = value + (opts.Increment or 1)
+        if value > max then value = min end
+        label.Text = (opts.Name or "Slider") .. ": " .. tostring(value)
+        sliderBtn.Text = tostring(value)
+        if opts.Callback then opts.Callback(value) end
+    end)
+    table.insert(self.Components, frame)
+    return sliderBtn
+end
+
+-- SECTION: CreateColorPicker
+function TabClass:CreateColorPicker(opts)
+    opts = type(opts) == "table" and opts or {Name = tostring(opts)}
+    local theme = self.ParentWindow.Theme
+    local btn = CreateStyledButton(opts.Name or "ColorPicker", theme, self.Frame)
+    local colors = opts.Colors or {
+        Color3.fromRGB(255,255,255),
+        Color3.fromRGB(255,0,0),
+        Color3.fromRGB(0,255,0),
+        Color3.fromRGB(0,0,255),
+        Color3.fromRGB(255,255,0)
+    }
+    local idx = 1
+    btn.BackgroundColor3 = colors[idx]
+    btn.TextColor3 = theme.Text
+    btn.MouseButton1Click:Connect(function()
+        idx = idx % #colors + 1
+        btn.BackgroundColor3 = colors[idx]
+        if opts.Callback then opts.Callback(colors[idx]) end
+    end)
+    table.insert(self.Components, btn)
+    return btn
+end
+
+-- SECTION: CreateDivider
+function TabClass:CreateDivider()
+    local div = Instance.new("Frame")
+    div.Name = "Divider"
+    div.Size = UDim2.new(1, 0, 0, 2)
+    div.BackgroundColor3 = self.ParentWindow.Theme.Border
+    div.BorderSizePixel = 0
+    div.ZIndex = 19
+    div.Parent = self.Frame
+    table.insert(self.Components, div)
+    return div
+end
+
+--// PARTE 4: NOTIFICAÇÕES, FLAGS E ATALHOS //--
+
+-- Sistema de Notificações
+function NovaUILibrary:Notify(opts)
+    opts = opts or {}
+    local theme = self.Theme
+    local notif = Instance.new("Frame")
+    notif.Name = "Notification"
+    notif.Size = UDim2.new(0, 320, 0, 80)
+    notif.Position = UDim2.new(0.5, -160, 0, -100)
+    notif.BackgroundColor3 = theme.Notification
+    notif.BorderSizePixel = 0
+    notif.BackgroundTransparency = 0.1
+    notif.ZIndex = 100
+    notif.Parent = self.Gui
+
+    local title = Instance.new("TextLabel")
+    title.Name = "NotifTitle"
+    title.Text = opts.Title or "Notificação"
+    title.Size = UDim2.new(1, -16, 0, 28)
+    title.Position = UDim2.new(0, 8, 0, 4)
+    title.BackgroundTransparency = 1
+    title.TextColor3 = theme.Text
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 18
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.ZIndex = 101
+    title.Parent = notif
+
+    local content = Instance.new("TextLabel")
+    content.Name = "NotifContent"
+    content.Text = opts.Content or "Mensagem"
+    content.Size = UDim2.new(1, -16, 0, 36)
+    content.Position = UDim2.new(0, 8, 0, 36)
+    content.BackgroundTransparency = 1
+    content.TextColor3 = theme.Text
+    content.Font = Enum.Font.Gotham
+    content.TextSize = 15
+    content.TextXAlignment = Enum.TextXAlignment.Left
+    content.TextWrapped = true
+    content.ZIndex = 101
+    content.Parent = notif
+
+    -- Animação de entrada
+    notif.Position = UDim2.new(0.5, -160, 0, -100)
+    Tween(notif, {Position = UDim2.new(0.5, -160, 0, 32)}, 0.3)
+
+    -- Fechar após duração
+    local dur = opts.Duration or 4
+    task.spawn(function()
+        wait(dur)
+        Tween(notif, {Position = UDim2.new(0.5, -160, 0, -100)}, 0.3)
+        wait(0.32)
+        notif:Destroy()
+    end)
+end
+
+-- Sistema de Flags (Configuração)
+NovaUILibrary.Flags = {}
+
+function NovaUILibrary:SetFlag(flag, value)
+    self.Flags[flag] = value
+end
+
+function NovaUILibrary:GetFlag(flag)
+    return self.Flags[flag]
+end
+
+function NovaUILibrary:SaveFlags(filename)
+    -- Para executores que suportam writefile
+    if writefile then
+        local data = game:GetService("HttpService"):JSONEncode(self.Flags)
+        writefile(filename or (self.Name .. "_flags.json"), data)
+    end
+end
+
+function NovaUILibrary:LoadFlags(filename)
+    if readfile then
+        local data = readfile(filename or (self.Name .. "_flags.json"))
+        if data then
+            self.Flags = game:GetService("HttpService"):JSONDecode(data)
+        end
+    end
+end
+
+-- Suporte a atalhos de teclado para Tabs
+function NovaUILibrary:BindTabShortcut(tabIndex, keyCode)
+    local tab = self.Tabs[tabIndex]
+    if not tab then return end
+    game:GetService("UserInputService").InputBegan:Connect(function(input, gpe)
+        if gpe then return end
+        if input.KeyCode == keyCode then
+            self:SelectTab(tab)
+        end
+    end)
+end
+
+-- Exemplo de uso de flags nos componentes (pode ser expandido nos componentes):
+-- Quando criar um componente, pode-se adicionar:
+-- self.ParentWindow:SetFlag(opts.Flag, valor)
+-- E ler com self.ParentWindow:GetFlag(opts.Flag)
+
+--// PARTE 5: TOOLTIPS, POPUPS, HELPERS, TEMAS CUSTOMIZADOS, DOCS //--
+
+-- Helper: Tooltip
+function NovaUILibrary:AttachTooltip(instance, text)
+    local tooltip = Instance.new("TextLabel")
+    tooltip.Name = "Tooltip"
+    tooltip.Text = text
+    tooltip.Size = UDim2.new(0, 0, 0, 24)
+    tooltip.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    tooltip.TextColor3 = Color3.fromRGB(255, 255, 255)
+    tooltip.Font = Enum.Font.Gotham
+    tooltip.TextSize = 14
+    tooltip.BackgroundTransparency = 0.15
+    tooltip.BorderSizePixel = 0
+    tooltip.Visible = false
+    tooltip.ZIndex = 200
+    tooltip.Parent = self.Gui
+    instance.MouseEnter:Connect(function()
+        tooltip.Visible = true
+        tooltip.Position = UDim2.new(0, game:GetService("UserInputService").GetMouseLocation().X + 12, 0, game:GetService("UserInputService").GetMouseLocation().Y - 12)
+    end)
+    instance.MouseLeave:Connect(function()
+        tooltip.Visible = false
+    end)
+    instance.MouseMoved:Connect(function(x, y)
+        tooltip.Position = UDim2.new(0, x + 12, 0, y - 12)
+    end)
+    return tooltip
+end
+
+-- Helper: Popup simples
+function NovaUILibrary:Popup(opts)
+    opts = opts or {}
+    local theme = self.Theme
+    local popup = Instance.new("Frame")
+    popup.Name = "Popup"
+    popup.Size = UDim2.new(0, 340, 0, 120)
+    popup.Position = UDim2.new(0.5, -170, 0.5, -60)
+    popup.BackgroundColor3 = theme.Notification
+    popup.BorderSizePixel = 0
+    popup.BackgroundTransparency = 0.08
+    popup.ZIndex = 150
+    popup.Parent = self.Gui
+
+    local title = Instance.new("TextLabel")
+    title.Name = "PopupTitle"
+    title.Text = opts.Title or "Popup"
+    title.Size = UDim2.new(1, -16, 0, 32)
+    title.Position = UDim2.new(0, 8, 0, 8)
+    title.BackgroundTransparency = 1
+    title.TextColor3 = theme.Text
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 20
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.ZIndex = 151
+    title.Parent = popup
+
+    local content = Instance.new("TextLabel")
+    content.Name = "PopupContent"
+    content.Text = opts.Content or "Mensagem do popup."
+    content.Size = UDim2.new(1, -16, 0, 48)
+    content.Position = UDim2.new(0, 8, 0, 44)
+    content.BackgroundTransparency = 1
+    content.TextColor3 = theme.Text
+    content.Font = Enum.Font.Gotham
+    content.TextSize = 16
+    content.TextXAlignment = Enum.TextXAlignment.Left
+    content.TextWrapped = true
+    content.ZIndex = 151
+    content.Parent = popup
+
+    local okBtn = Instance.new("TextButton")
+    okBtn.Name = "PopupOK"
+    okBtn.Text = opts.ButtonText or "OK"
+    okBtn.Size = UDim2.new(0, 80, 0, 32)
+    okBtn.Position = UDim2.new(1, -88, 1, -40)
+    okBtn.BackgroundColor3 = theme.Accent
+    okBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    okBtn.Font = Enum.Font.GothamBold
+    okBtn.TextSize = 16
+    okBtn.BorderSizePixel = 0
+    okBtn.ZIndex = 152
+    okBtn.Parent = popup
+    okBtn.MouseButton1Click:Connect(function()
+        Tween(popup, {BackgroundTransparency = 1}, 0.2)
+        wait(0.22)
+        popup:Destroy()
+        if opts.Callback then opts.Callback() end
+    end)
+    return popup
+end
+
+-- Helper: Adicionar tema customizado
+function NovaUILibrary:AddTheme(name, themeTable)
+    Themes[name] = themeTable
+end
+
+-- Helper: Tween avançado para múltiplos objetos
+function NovaUILibrary:MultiTween(objects, props, time, style, dir)
+    for _, obj in ipairs(objects) do
+        Tween(obj, props, time, style, dir)
+    end
+end
+
+-- Helper: Resetar UI
+function NovaUILibrary:ResetUI()
+    if self.Gui then self.Gui:Destroy() end
+end
+
+--// DOCUMENTAÇÃO INTERNA E EXEMPLO DE USO //--
+
+--[[
+Exemplo de uso da NovaUILibrary:
+
+local Library = loadstring(game:HttpGet("URL_DA_SUA_LIBRARY"))()
+local Window = Library:CreateWindow({
+    Name = "Minha Nova UI",
+    Theme = "Dark",
+    MinimizeKey = Enum.KeyCode.RightControl
+})
+
+local Tab = Window:CreateTab("Principal")
+local Section = Tab:CreateSection("Funções")
+
+Section:CreateButton({Name = "Clique", Callback = function() print("Clicou!") end})
+Section:CreateToggle({Name = "Ativar", Callback = function(v) print("Toggle:", v) end})
+Section:CreateInput({Name = "Texto", Callback = function(txt) print(txt) end})
+Section:CreateDropdown({Name = "Escolha", Options = {"A", "B"}, Callback = function(opt) print(opt) end})
+Section:CreateSlider({Name = "Volume", Range = {0,100}, Callback = function(v) print(v) end})
+Section:CreateColorPicker({Name = "Cor", Callback = function(c) print(c) end})
+Section:CreateDivider()
+
+Window:Notify({Title = "Bem-vindo!", Content = "NovaUILibrary carregada com sucesso!", Duration = 5})
+Window:Popup({Title = "Atenção", Content = "Popup de exemplo.", Callback = function() print("Popup fechado!") end})
+Window:BindTabShortcut(1, Enum.KeyCode.F1)
+
+-- Adicionar tema customizado:
+Window:AddTheme("AzulEscuro", {
+    Background = Color3.fromRGB(10, 20, 40),
+    Topbar = Color3.fromRGB(20, 30, 60),
+    Shadow = Color3.fromRGB(10, 10, 20),
+    Text = Color3.fromRGB(200, 220, 255),
+    Accent = Color3.fromRGB(0, 120, 255),
+    Button = Color3.fromRGB(30, 40, 60),
+    ButtonHover = Color3.fromRGB(40, 60, 90),
+    Border = Color3.fromRGB(20, 30, 50),
+    Tab = Color3.fromRGB(30, 40, 60),
+    TabSelected = Color3.fromRGB(0, 120, 255),
+    Input = Color3.fromRGB(20, 30, 50),
+    Placeholder = Color3.fromRGB(120, 140, 180),
+    ToggleOn = Color3.fromRGB(0, 120, 255),
+    ToggleOff = Color3.fromRGB(60, 80, 120),
+    Slider = Color3.fromRGB(0, 120, 255),
+    Notification = Color3.fromRGB(20, 30, 50),
+})
+
+-- Para tooltips:
+-- local btn = Section:CreateButton({Name = "Com Tooltip"})
+-- Window:AttachTooltip(btn, "Clique para executar ação!")
+
+]]
+
+-- ... fim da Parte 5 ...
+
+return NovaUILibrary 
