@@ -1,0 +1,257 @@
+--[[
+    Roblox UI Library - Estrutura Base
+    Inspirada em Rayfield, mas com API mais flexível e fácil de expandir.
+    Para uso: local Library = loadstring(game:HttpGet("URL"))()
+]]
+
+local Library = {}
+Library.__index = Library
+
+-- Utilitário para criar instâncias
+local function create(class, props)
+    local obj = Instance.new(class)
+    for k, v in pairs(props or {}) do
+        obj[k] = v
+    end
+    return obj
+end
+
+-- Window
+function Library:NewWindow(name)
+    local self = setmetatable({}, Library)
+    self.Name = name or "Window"
+    self.Sections = {}
+
+    -- Criar a ScreenGui principal
+    self.Gui = create("ScreenGui", {
+        Name = self.Name .. "_UI",
+        ResetOnSpawn = false,
+        Parent = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+    })
+
+    -- Container principal
+    self.Main = create("Frame", {
+        Name = "MainFrame",
+        Size = UDim2.new(0, 500, 0, 400),
+        Position = UDim2.new(0.5, -250, 0.5, -200),
+        BackgroundColor3 = Color3.fromRGB(30, 30, 30),
+        BorderSizePixel = 0,
+        Parent = self.Gui
+    })
+
+    -- Título
+    local title = create("TextLabel", {
+        Name = "Title",
+        Text = self.Name,
+        Size = UDim2.new(1, 0, 0, 40),
+        BackgroundTransparency = 1,
+        TextColor3 = Color3.fromRGB(255,255,255),
+        Font = Enum.Font.GothamBold,
+        TextSize = 24,
+        Parent = self.Main
+    })
+
+    -- Layout para seções
+    self.SectionLayout = create("UIListLayout", {
+        Parent = self.Main,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 8)
+    })
+
+    function self:NewSection(sectionName)
+        local section = {}
+        section.Name = sectionName or "Section"
+        section.Components = {}
+
+        section.Frame = create("Frame", {
+            Name = section.Name .. "_Frame",
+            Size = UDim2.new(1, -16, 0, 60),
+            BackgroundColor3 = Color3.fromRGB(40, 40, 40),
+            BorderSizePixel = 0,
+            Parent = self.Main
+        })
+        create("UIListLayout", {
+            Parent = section.Frame,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Padding = UDim.new(0, 6)
+        })
+        local label = create("TextLabel", {
+            Name = "SectionLabel",
+            Text = section.Name,
+            Size = UDim2.new(1, 0, 0, 24),
+            BackgroundTransparency = 1,
+            TextColor3 = Color3.fromRGB(200,200,200),
+            Font = Enum.Font.Gotham,
+            TextSize = 18,
+            Parent = section.Frame
+        })
+
+        -- Button
+        function section:CreateButton(text, callback)
+            local btn = create("TextButton", {
+                Name = text .. "_Button",
+                Text = text,
+                Size = UDim2.new(1, 0, 0, 32),
+                BackgroundColor3 = Color3.fromRGB(60, 60, 60),
+                TextColor3 = Color3.fromRGB(255,255,255),
+                Font = Enum.Font.Gotham,
+                TextSize = 16,
+                Parent = section.Frame
+            })
+            btn.MouseButton1Click:Connect(function()
+                if callback then callback() end
+            end)
+            table.insert(section.Components, btn)
+            return btn
+        end
+
+        -- Toggle
+        function section:CreateToggle(text, callback)
+            local toggle = create("TextButton", {
+                Name = text .. "_Toggle",
+                Text = "[ ] " .. text,
+                Size = UDim2.new(1, 0, 0, 32),
+                BackgroundColor3 = Color3.fromRGB(60, 60, 60),
+                TextColor3 = Color3.fromRGB(255,255,255),
+                Font = Enum.Font.Gotham,
+                TextSize = 16,
+                Parent = section.Frame
+            })
+            local state = false
+            toggle.MouseButton1Click:Connect(function()
+                state = not state
+                toggle.Text = (state and "[X] " or "[ ] ") .. text
+                if callback then callback(state) end
+            end)
+            table.insert(section.Components, toggle)
+            return toggle
+        end
+
+        -- TextBox
+        function section:CreateTextbox(text, callback)
+            local box = create("TextBox", {
+                Name = text .. "_Textbox",
+                Text = "",
+                PlaceholderText = text,
+                Size = UDim2.new(1, 0, 0, 32),
+                BackgroundColor3 = Color3.fromRGB(60, 60, 60),
+                TextColor3 = Color3.fromRGB(255,255,255),
+                Font = Enum.Font.Gotham,
+                TextSize = 16,
+                Parent = section.Frame
+            })
+            box.FocusLost:Connect(function(enter)
+                if enter and callback then callback(box.Text) end
+            end)
+            table.insert(section.Components, box)
+            return box
+        end
+
+        -- Dropdown
+        function section:CreateDropdown(text, options, default, callback)
+            local dropdown = create("TextButton", {
+                Name = text .. "_Dropdown",
+                Text = text .. ": " .. tostring(options[default] or options[1]),
+                Size = UDim2.new(1, 0, 0, 32),
+                BackgroundColor3 = Color3.fromRGB(60, 60, 60),
+                TextColor3 = Color3.fromRGB(255,255,255),
+                Font = Enum.Font.Gotham,
+                TextSize = 16,
+                Parent = section.Frame
+            })
+            local idx = default or 1
+            dropdown.MouseButton1Click:Connect(function()
+                idx = idx + 1
+                if idx > #options then idx = 1 end
+                dropdown.Text = text .. ": " .. tostring(options[idx])
+                if callback then callback(options[idx]) end
+            end)
+            table.insert(section.Components, dropdown)
+            return dropdown
+        end
+
+        -- Slider
+        function section:CreateSlider(text, min, max, default, precise, callback)
+            local sliderFrame = create("Frame", {
+                Name = text .. "_SliderFrame",
+                Size = UDim2.new(1, 0, 0, 32),
+                BackgroundTransparency = 1,
+                Parent = section.Frame
+            })
+            local label = create("TextLabel", {
+                Name = "SliderLabel",
+                Text = text .. ": " .. tostring(default),
+                Size = UDim2.new(0.5, 0, 1, 0),
+                BackgroundTransparency = 1,
+                TextColor3 = Color3.fromRGB(255,255,255),
+                Font = Enum.Font.Gotham,
+                TextSize = 16,
+                Parent = sliderFrame
+            })
+            local slider = create("TextButton", {
+                Name = text .. "_Slider",
+                Text = tostring(default),
+                Size = UDim2.new(0.5, 0, 1, 0),
+                Position = UDim2.new(0.5, 0, 0, 0),
+                BackgroundColor3 = Color3.fromRGB(80, 80, 80),
+                TextColor3 = Color3.fromRGB(255,255,255),
+                Font = Enum.Font.Gotham,
+                TextSize = 16,
+                Parent = sliderFrame
+            })
+            local value = default or min
+            slider.MouseButton1Click:Connect(function()
+                value = value + (precise and 0.1 or 1)
+                if value > max then value = min end
+                label.Text = text .. ": " .. tostring(value)
+                slider.Text = tostring(value)
+                if callback then callback(value) end
+            end)
+            table.insert(section.Components, sliderFrame)
+            return sliderFrame
+        end
+
+        -- ColorPicker (simples)
+        function section:CreateColorPicker(text, default, callback)
+            local btn = create("TextButton", {
+                Name = text .. "_ColorPicker",
+                Text = text,
+                Size = UDim2.new(1, 0, 0, 32),
+                BackgroundColor3 = default or Color3.fromRGB(255,255,255),
+                TextColor3 = Color3.fromRGB(0,0,0),
+                Font = Enum.Font.Gotham,
+                TextSize = 16,
+                Parent = section.Frame
+            })
+            btn.MouseButton1Click:Connect(function()
+                -- Simples: alterna entre algumas cores
+                local colors = {
+                    Color3.fromRGB(255,255,255),
+                    Color3.fromRGB(255,0,0),
+                    Color3.fromRGB(0,255,0),
+                    Color3.fromRGB(0,0,255),
+                    Color3.fromRGB(255,255,0)
+                }
+                local idx = 1
+                for i, c in ipairs(colors) do
+                    if btn.BackgroundColor3 == c then
+                        idx = i
+                        break
+                    end
+                end
+                idx = idx % #colors + 1
+                btn.BackgroundColor3 = colors[idx]
+                if callback then callback(colors[idx]) end
+            end)
+            table.insert(section.Components, btn)
+            return btn
+        end
+
+        table.insert(self.Sections, section)
+        return section
+    end
+
+    return self
+end
+
+return Library 
